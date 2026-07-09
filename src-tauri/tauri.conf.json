@@ -5,7 +5,7 @@
   "identifier": "com.admin.krdiffgui",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:9898",
+    "devUrl": "http://localhost:39898",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },

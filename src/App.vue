@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { nextTick, onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 
 const sourceDir = ref("");
@@ -8,12 +9,31 @@ const patchDir = ref("");
 const outputDir = ref("");
 const logs = ref<string[]>([]);
 const running = ref(false);
+const logBox = ref<HTMLElement | null>(null);
+let unlistenPatchLog: UnlistenFn | null = null;
 
 function addLog(message: string) {
   const time = new Date().toLocaleTimeString();
   logs.value.push(`[${time}] ${message}`);
-}
 
+  nextTick(() => {
+    if (logBox.value) {
+      logBox.value.scrollTop = logBox.value.scrollHeight;
+    }
+  });
+}
+onMounted(async () => {
+  unlistenPatchLog = await listen<string>("patch-log", (event) => {
+    addLog(event.payload);
+  });
+});
+
+onUnmounted(() => {
+  if (unlistenPatchLog) {
+    unlistenPatchLog();
+    unlistenPatchLog = null;
+  }
+});
 async function selectDirectory(target: "source" | "patch" | "output") {
   const selected = await open({
     directory: true,
@@ -60,15 +80,11 @@ async function runPatch() {
   addLog("开始执行补丁...");
 
   try {
-    const result = await invoke<string[]>("apply_krdiff_dir", {
+    await invoke("apply_krdiff_dir", {
       sourceDir: sourceDir.value,
       patchDir: patchDir.value,
       outputDir: outputDir.value,
     });
-
-    for (const line of result) {
-      addLog(line);
-    }
 
     addLog("执行完成");
   } catch (error) {
@@ -127,7 +143,7 @@ async function runPatch() {
         {{ running ? "running..." : "run" }}
       </button>
 
-      <div class="log-box">
+      <div ref="logBox" class="log-box">
         <div v-if="logs.length === 0" class="log-placeholder">
           The log will be displayed here
         </div>

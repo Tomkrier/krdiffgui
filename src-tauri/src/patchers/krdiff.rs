@@ -3,26 +3,29 @@ use std::path::Path;
 use crate::patchers::KrDiff;
 use crate::utils::patch_krdir::KrPatchDir;
 
-/*
-WARNING: This shit is extremely cursed and is modification of standard HDiff format, it is not something you should use it can break and go to fuckshit anytime...
-This only exists to support TwintailLauncher's use case and is very hacked to hell compared to actual standard HDiff patching part
-HERE BE DRAGONS you are warned!!!
-#FuckKuroGames btw
-*/
+// ... existing code ...
 
 impl KrDiff {
     pub fn new(source_path: String, diff_path: String, dest_path: String) -> Self {
         KrDiff { source_path, diff_path, dest_path }
     }
 
-    pub fn apply(&mut self) -> bool {
-        match self.apply_inner() {
-            Ok(()) => true,
-            Err(e) => { eprintln!("[KrDiff::apply] Error: {}", e); false }
+    pub fn apply(&mut self) -> Result<(), String> {
+        self.apply_with_progress(None)
+    }
+
+    pub fn apply_with_progress(&mut self, write_bytes_cb: Option<Box<dyn FnMut(i64)>>) -> Result<(), String> {
+        match self.apply_inner(write_bytes_cb) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                let message = format!("[KrDiff::apply] Error: {}", e);
+                eprintln!("{message}");
+                Err(message)
+            }
         }
     }
 
-    fn apply_inner(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn apply_inner(&self, write_bytes_cb: Option<Box<dyn FnMut(i64)>>) -> Result<(), Box<dyn std::error::Error>> {
         let src = Path::new(&self.source_path);
         let diffp = Path::new(&self.diff_path);
 
@@ -32,7 +35,7 @@ impl KrDiff {
         if !dst.exists() { create_dir_all(&dst)?; }
 
         let patcher = KrPatchDir::new(self.diff_path.clone());
-        patcher.patch(src.to_str().unwrap_or(""), dst.to_str().unwrap_or(""), None)?;
+        patcher.patch(src.to_str().unwrap_or(""), dst.to_str().unwrap_or(""), write_bytes_cb)?;
         Ok(())
     }
 }
