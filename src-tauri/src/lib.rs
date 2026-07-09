@@ -72,6 +72,10 @@ fn apply_krdiff_dir_blocking(
         return Err(format!("patch_dir 不是目录: {}", patch_dir_path.display()));
     }
 
+    let output_dir_path = PathBuf::from(&output_dir);
+    fs::create_dir_all(&output_dir_path)
+        .map_err(|err| format!("创建 output_dir 失败: {err}"))?;
+
     let mut patch_files: Vec<PathBuf> = fs::read_dir(&patch_dir_path)
         .map_err(|err| format!("读取 patch 目录失败: {err}"))?
         .filter_map(Result::ok)
@@ -96,22 +100,38 @@ fn apply_krdiff_dir_blocking(
         ));
     }
 
+    // 在 source_dir 中创建本次 run 唯一的临时工作目录
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let temp_dir_name = format!(".krdiffgui_work_{}", timestamp);
+    let temp_dir = source_dir_path.join(&temp_dir_name);
+    fs::create_dir_all(&temp_dir)
+        .map_err(|err| format!("创建临时目录失败: {err}"))?;
+
     emit_log(&app, format!("source_dir: {source_dir}"));
     emit_log(&app, format!("patch_dir: {patch_dir}"));
     emit_log(&app, format!("output_dir: {output_dir}"));
+    emit_log(&app, format!("临时目录: {}", temp_dir.display()));
     emit_log(&app, format!("找到 {} 个补丁文件", patch_files.len()));
 
-    for patch_path in patch_files {
+    for patch_path in &patch_files {
         let patch_display = patch_path.display().to_string();
         emit_log(&app, format!("正在应用补丁: {patch_display}"));
+
+        // 清空临时目录，准备本次 patch
+        clear_dir_contents(&temp_dir)
+            .map_err(|err| format!("清空临时目录失败: {err}"))?;
 
         let mut patcher = KrDiff::new(
             source_dir.clone(),
             patch_path.to_string_lossy().into_owned(),
-            output_dir.clone(),
+            temp_dir.to_string_lossy().into_owned(),
         );
 
         let app_for_progress = app.clone();
+        let app_for_log = app.clone();
         let patch_for_progress = patch_display.clone();
         let mut last_emit = Instant::now();
 
@@ -124,18 +144,60 @@ fn apply_krdiff_dir_blocking(
                 );
                 last_emit = Instant::now();
             }
-        }))) {
+        })),
+            Some(Box::new(move |msg| emit_log(&app_for_log, msg))),
+        ) {
             Ok(()) => {
+                // 将临时目录中的文件复制到 output_dir
+                copy_dir_contents(&temp_dir, &output_dir_path)
+                    .map_err(|err| format!("复制文件到输出目录失败: {err}"))?;
                 emit_log(&app, format!("应用成功: {patch_display}"));
             }
             Err(err) => {
+                let _ = fs::remove_dir_all(&temp_dir);
                 return Err(format!("{}，补丁文件: {}", err, patch_display));
             }
         }
     }
 
+    // 清理临时目录
+    let _ = fs::remove_dir_all(&temp_dir);
+
     emit_log(&app, "全部补丁应用完成");
 
+    Ok(())
+}
+
+/// 递归复制 src 目录下的所有内容到 dst 目录
+fn copy_dir_contents(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    if !dst.exists() {
+        fs::create_dir_all(dst)?;
+    }
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_contents(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
+/// 清空目录下的所有内容，但保留目录本身
+fn clear_dir_contents(dir: &std::path::Path) -> std::io::Result<()> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            fs::remove_dir_all(&path)?;
+        } else {
+            fs::remove_file(&path)?;
+        }
+    }
     Ok(())
 }
 

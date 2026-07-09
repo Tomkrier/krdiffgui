@@ -11,11 +11,11 @@ impl KrDiff {
     }
 
     pub fn apply(&mut self) -> Result<(), String> {
-        self.apply_with_progress(None)
+        self.apply_with_progress(None, None)
     }
 
-    pub fn apply_with_progress(&mut self, write_bytes_cb: Option<Box<dyn FnMut(i64)>>) -> Result<(), String> {
-        match self.apply_inner(write_bytes_cb) {
+    pub fn apply_with_progress(&mut self, write_bytes_cb: Option<Box<dyn FnMut(i64)>>, log_cb: Option<Box<dyn FnMut(String)>>) -> Result<(), String> {
+        match self.apply_inner(write_bytes_cb, log_cb) {
             Ok(()) => Ok(()),
             Err(e) => {
                 let message = format!("[KrDiff::apply] Error: {}", e);
@@ -25,7 +25,7 @@ impl KrDiff {
         }
     }
 
-    fn apply_inner(&self, write_bytes_cb: Option<Box<dyn FnMut(i64)>>) -> Result<(), Box<dyn std::error::Error>> {
+    fn apply_inner(&self, write_bytes_cb: Option<Box<dyn FnMut(i64)>>, log_cb: Option<Box<dyn FnMut(String)>>) -> Result<(), Box<dyn std::error::Error>> {
         let src = Path::new(&self.source_path);
         let diffp = Path::new(&self.diff_path);
 
@@ -35,7 +35,7 @@ impl KrDiff {
         if !dst.exists() { create_dir_all(&dst)?; }
 
         let patcher = KrPatchDir::new(self.diff_path.clone());
-        patcher.patch(src.to_str().unwrap_or(""), dst.to_str().unwrap_or(""), write_bytes_cb)?;
+        patcher.patch(src.to_str().unwrap_or(""), dst.to_str().unwrap_or(""), write_bytes_cb, log_cb)?;
         Ok(())
     }
 }

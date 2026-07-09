@@ -23,7 +23,7 @@ impl KrPatchDir {
         Self { patch_path }
     }
 
-    pub fn patch(&self, input: &str, output: &str, write_bytes_cb: Option<Box<dyn FnMut(i64)>>) -> io::Result<()> {
+    pub fn patch(&self, input: &str, output: &str, write_bytes_cb: Option<Box<dyn FnMut(i64)>>, mut log_cb: Option<Box<dyn FnMut(String)>>) -> io::Result<()> {
         let base_input  = PathBuf::from(input);
         let base_output = PathBuf::from(output);
 
@@ -39,7 +39,15 @@ impl KrPatchDir {
             let full = base_input.join(&fe.path);
             if !full.exists() { return Err(io::Error::new(io::ErrorKind::NotFound, format!("[KrPatchDir] Old file not found: {}", full.display()))); }
             let actual = full.metadata()?.len();
-            if actual != fe.size { return Err(io::Error::new(io::ErrorKind::InvalidData, format!("[KrPatchDir] Old file size mismatch for {}: expected {} bytes, got {}", full.display(), fe.size, actual))); }
+            if actual != fe.size {
+                if hd19.head.new_files.iter().any(|nf| nf.path == fe.path && nf.size == actual) {
+                    if let Some(ref mut log) = log_cb {
+                        log(format!("[KrPatchDir] Old file {} size {} matches new file size, patch already applied, skipping: {}", full.display(), actual, self.patch_path));
+                    }
+                    return Ok(());
+                }
+                return Err(io::Error::new(io::ErrorKind::InvalidData, format!("[KrPatchDir] Old file size mismatch for {}: expected {} bytes, got {}", full.display(), fe.size, actual)));
+            }
         }
 
         for fe in &hd19.head.new_files {
